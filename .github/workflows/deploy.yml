@@ -32,28 +32,12 @@ jobs:
         with:
           install_components: gke-gcloud-auth-plugin
 
-      - name: Sanity check variables
-        run: |
-          echo "PROJECT_ID=$PROJECT_ID"
-          echo "GKE_CLUSTER=$GKE_CLUSTER"
-          echo "GKE_LOCATION=$GKE_LOCATION"
-          echo "NAMESPACE=$NAMESPACE"
-          echo "GAR_LOCATION=$GAR_LOCATION"
-          echo "GAR_REPO=$GAR_REPO"
-          echo "IMAGE_NAME=$IMAGE_NAME"
-
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.GKE_CLUSTER }}
           location: ${{ env.GKE_LOCATION }}
           project_id: ${{ env.PROJECT_ID }}
-
-      - name: Confirm cluster access
-        run: |
-          kubectl version --short
-          kubectl get nodes
-          kubectl get ns
 
       - name: Create namespace (idempotent)
         run: kubectl apply -f k8s/namespace.yaml
@@ -69,15 +53,6 @@ jobs:
           IMAGE_URI="$GAR_LOCATION-docker.pkg.dev/$PROJECT_ID/$GAR_REPO/$IMAGE_NAME:latest"
           sed -i "s|REPLACE_WITH_ARTIFACT_REGISTRY_IMAGE|$IMAGE_URI|g" k8s/deployment.yaml
           echo "Using image: $IMAGE_URI"
-          echo "----- DEPLOYMENT (after injection) -----"
-          cat k8s/deployment.yaml
-          echo "----------------------------------------"
-
-      # 🔎 Validate manifests against the live API to get precise error messages
-      - name: Validate manifests (server-side dry-run)
-        run: |
-          kubectl -n "$NAMESPACE" apply --dry-run=server -f k8s/deployment.yaml
-          kubectl -n "$NAMESPACE" apply --dry-run=server -f k8s/service.yaml
 
       - name: Apply manifests
         run: |
