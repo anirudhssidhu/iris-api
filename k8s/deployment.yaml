@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iris-api
+  namespace: iris-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: iris-api
+  template:
+    metadata:
+      labels:
+        app: iris-api
+    spec:
+      containers:
+      - name: iris-api
+        image: REPLACE_WITH_ARTIFACT_REGISTRY_IMAGE
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GCS_BUCKET
+          value: "mlops-course-vocal-marking-473407-c4-unique"
+        - name: MODEL_BLOB
+          value: "my-models/iris-classifier-week-1/model.joblib"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/var/secrets/google/key.json"
+        volumeMounts:
+        - name: gcp-creds
+          mountPath: "/var/secrets/google"
+          readOnly: true
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 20
+      volumes:
+      - name: gcp-creds
+        secret:
+          secretName: gcp-creds
