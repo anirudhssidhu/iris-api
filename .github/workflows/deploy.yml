@@ -22,19 +22,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ✅ Authenticate to Google Cloud (needed by get-gke-credentials and gcloud/kubectl)
       - name: Auth to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
 
-      # ✅ Ensure gcloud CLI (and GKE auth plugin) are present
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           install_components: gke-gcloud-auth-plugin
 
-      # Get kubeconfig for your cluster
+      - name: Sanity check variables
+        run: |
+          echo "PROJECT_ID=$PROJECT_ID"
+          echo "GKE_CLUSTER=$GKE_CLUSTER"
+          echo "GKE_LOCATION=$GKE_LOCATION"
+          echo "NAMESPACE=$NAMESPACE"
+          echo "GAR_LOCATION=$GAR_LOCATION"
+          echo "GAR_REPO=$GAR_REPO"
+          echo "IMAGE_NAME=$IMAGE_NAME"
+
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
@@ -42,24 +49,36 @@ jobs:
           location: ${{ env.GKE_LOCATION }}
           project_id: ${{ env.PROJECT_ID }}
 
-      # Create namespace if missing
+      - name: Confirm cluster access
+        run: |
+          kubectl version --short
+          kubectl get nodes
+          kubectl get ns
+
       - name: Create namespace (idempotent)
         run: kubectl apply -f k8s/namespace.yaml
 
-      # Create/refresh the Secret from your JSON key (so the pod can read GCS)
-      - name: Create gcp-creds secret
+      - name: Create/refresh gcp-creds secret
         run: |
           echo '${{ secrets.GCP_CREDENTIALS_JSON }}' > key.json
           kubectl -n "$NAMESPACE" delete secret gcp-creds --ignore-not-found=true
           kubectl -n "$NAMESPACE" create secret generic gcp-creds --from-file=key.json=key.json
 
-      # Inject the image URI into the deployment
       - name: Inject image URI
         run: |
           IMAGE_URI="$GAR_LOCATION-docker.pkg.dev/$PROJECT_ID/$GAR_REPO/$IMAGE_NAME:latest"
           sed -i "s|REPLACE_WITH_ARTIFACT_REGISTRY_IMAGE|$IMAGE_URI|g" k8s/deployment.yaml
+          echo "Using image: $IMAGE_URI"
+          echo "----- DEPLOYMENT (after injection) -----"
+          cat k8s/deployment.yaml
+          echo "----------------------------------------"
 
-      # Apply manifests & wait for rollout
+      # 🔎 Validate manifests against the live API to get precise error messages
+      - name: Validate manifests (server-side dry-run)
+        run: |
+          kubectl -n "$NAMESPACE" apply --dry-run=server -f k8s/deployment.yaml
+          kubectl -n "$NAMESPACE" apply --dry-run=server -f k8s/service.yaml
+
       - name: Apply manifests
         run: |
           kubectl -n "$NAMESPACE" apply -f k8s/deployment.yaml
