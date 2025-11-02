@@ -22,31 +22,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ✅ Authenticate to Google Cloud (needed by get-gke-credentials and gcloud/kubectl)
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+
+      # ✅ Ensure gcloud CLI (and GKE auth plugin) are present
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_CREDENTIALS_JSON }}
-          export_default_credentials: true
+          install_components: gke-gcloud-auth-plugin
 
+      # Get kubeconfig for your cluster
       - name: Get GKE credentials
-        run: |
-          gcloud container clusters get-credentials "$GKE_CLUSTER" --region "$GKE_LOCATION" --project "$PROJECT_ID"
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
 
+      # Create namespace if missing
       - name: Create namespace (idempotent)
         run: kubectl apply -f k8s/namespace.yaml
 
+      # Create/refresh the Secret from your JSON key (so the pod can read GCS)
       - name: Create gcp-creds secret
         run: |
           echo '${{ secrets.GCP_CREDENTIALS_JSON }}' > key.json
           kubectl -n "$NAMESPACE" delete secret gcp-creds --ignore-not-found=true
           kubectl -n "$NAMESPACE" create secret generic gcp-creds --from-file=key.json=key.json
 
+      # Inject the image URI into the deployment
       - name: Inject image URI
         run: |
           IMAGE_URI="$GAR_LOCATION-docker.pkg.dev/$PROJECT_ID/$GAR_REPO/$IMAGE_NAME:latest"
           sed -i "s|REPLACE_WITH_ARTIFACT_REGISTRY_IMAGE|$IMAGE_URI|g" k8s/deployment.yaml
 
+      # Apply manifests & wait for rollout
       - name: Apply manifests
         run: |
           kubectl -n "$NAMESPACE" apply -f k8s/deployment.yaml
